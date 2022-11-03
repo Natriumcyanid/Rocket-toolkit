@@ -1,0 +1,261 @@
+import matplotlib.pyplot as plt
+import numpy as np
+import matplotlib.image as image
+
+import serial
+import time
+
+import tkinter as tk
+import tkinter.scrolledtext as st
+from tkinter.filedialog import askopenfilename
+
+
+# TODO: Default window with choices from file/new measurement
+# TODO: From file allows to open new file and generates data from that
+# TODO: New measurement communicates with serial: Has a console, pings it first, button for start/end of measuring
+# TODO: Measurement gets saved to a newly generated text file, user inputs a name for the results and they are generated from text file
+# TODO: Buttons to go back to main menu
+
+class UI:
+
+    def __init__(self):
+
+        self.root = tk.Tk()
+        self.root.title("Thrust grapher")
+        self.root.geometry("700x500")
+        self.widgets = []
+        self.data = []
+
+        self.label = tk.Label(self.root, text="Welcome to Thrust grapher", font=("Arial", "30"))
+        self.label.pack(padx=30, pady=10)
+        self.widgets.append(self.label)
+
+        self.buttonFile = tk.Button(self.root, text="Calculate data from file", font=("Arial", "19"), command=self.fromFile)
+        self.buttonFile.pack(padx=30, pady=20)
+        self.widgets.append(self.buttonFile)
+
+        self.buttonDyno = tk.Button(self.root, text="Take dynamometer measurement", font=("Arial", "19"), command=self.dynamometer)
+        self.buttonDyno.pack(padx=30, pady=20)
+        self.widgets.append(self.buttonDyno)
+
+        self.buttonSim = tk.Button(self.root, text="Generate CSV engine file", font=("Arial", "19"), command=self.rockSim)
+        self.buttonSim.pack(padx=30, pady=20)
+        self.widgets.append(self.buttonSim)
+
+        self.signature = tk.Label(self.root, text="\xa9 Jakub Kulhavý, Neřízené střely s.r.o. 2022", font=("Arial", "10"))
+        self.signature.place(x=5, y=475)
+        self.widgets.append(self.signature)
+
+        self.root.mainloop()
+
+    def killWidgets(self):
+        for widget in self.widgets:
+            widget.destroy()
+
+    def goBack(self):
+        self.root.destroy()
+        self.__init__()
+
+    def createGraph(self):
+        pass
+
+    def selectFile(self):
+        print("select")
+
+    def dynamometer(self):
+        print("dyno press")
+        self.killWidgets()
+
+        self.label = tk.Label(self.root, text="Dynamometer test", font=("Arial", "20"))
+        self.label.place(x=250, y=15)
+        self.widgets.append(self.label)
+
+        self.console = st.ScrolledText(self.root, width=50, height=20, font=("Arial", "11"))
+        self.console.configure(state="disabled")
+        self.console.place(x=50, y=70)
+        self.widgets.append(self.console)
+
+        self.buttonStart = tk.Button(self.root, text="Start test", font=("Arial", "18"), command=self.goBack)
+        self.buttonStart.place(x=520, y=150)
+        self.widgets.append(self.buttonStart)
+
+        self.buttonStop = tk.Button(self.root, text="Stop test and graph", font=("Arial", "18"), command=self.goBack)
+        self.buttonStop.place(x=520, y=210)
+        self.widgets.append(self.buttonStop)
+
+        self.buttonBack = tk.Button(self.root, text="Main menu", font=("Arial", "18"), command=self.goBack)
+        self.buttonBack.place(x=520, y=270)
+        self.widgets.append(self.buttonBack)
+
+        self.signature = tk.Label(self.root, text="\xa9 Jakub Kulhavý, Neřízené střely s.r.o. 2022", font=("Arial", "10"))
+        self.signature.place(x=5, y=475)
+        self.widgets.append(self.signature)
+
+        self.serial = serial.Serial(port='/dev/ttyUSB0', baudrate=9600, timeout=.1)
+        emptyBytes = int()
+
+        while emptyBytes < 10:
+            line = self.serial.readline()
+            print("loop running")
+            self.console.insert(tk.INSERT, float(2))
+            if line != b'':
+                print(line)
+                for split in line.split():
+                    self.console.configure(state="normal")
+                    try: self.data.append(float(split)); self.console.insert(tk.INSERT, float(split))
+                    except ValueError: pass
+                    self.console.configure(state="disabled")
+                emptyBytes = 0
+            elif len(self.data):
+                emptyBytes += 1
+            self.root.update()
+
+        instance = Grapher(self.data)
+        instance()
+
+    def fromFile(self):
+        print("file press")
+        self.killWidgets()
+
+        self.buttonSelect = tk.Button(self.root, text="Select file", font=("Arial", "18"), command=self.goBack)
+        self.buttonSelect.pack()
+        self.widgets.append(self.buttonSelect)
+
+        self.buttonBack = tk.Button(self.root, text="Go back", font=("Arial", "18"), command=self.goBack)
+        self.buttonBack.pack()
+        self.widgets.append(self.buttonBack)
+
+        self.signature = tk.Label(self.root, text="\xa9 Jakub Kulhavý, Neřízené střely s.r.o. 2022", font=("Arial", "10"))
+        self.signature.place(x=5, y=475)
+        self.widgets.append(self.signature)
+
+        self.selectedFile = askopenfilename()
+        with open(self.selectedFile, 'r') as f:
+            for line in f.readlines():
+                for split in line.split():
+                    try: self.data.append(float(split))
+                    except ValueError: pass
+        f.close()
+
+        instance = Grapher(self.data)
+        instance()
+
+    def rockSim(self):
+        self.killWidgets()
+
+        self.signature = tk.Label(self.root, text="\xa9 Jakub Kulhavý, Neřízené střely s.r.o. 2022", font=("Arial", "10"))
+        self.signature.place(x=5, y=475)
+        self.widgets.append(self.signature)
+
+
+class Grapher:
+
+    def __init__(self, data):
+
+        gravity = 9.81
+        self.data = data
+        instance = Locator(self.data)
+        self.weightStart, weightStop, burnStart, burnStop, data = instance.locate()
+        self.timeData, self.timeAxis, self.rawAxis, self.massAxis, self.accAxis, self.velAxis, self.thrustAxis = [],[],[],[],[],[0],[]
+
+        self.fuelSpent = self.weightStart - weightStop
+
+        for tick in range(self.burnStop-self.burnStart): self.timeAxis.append(tick/self.frequency) # Generate a time axis
+        
+        for record in range(burnStart, burnStop):
+            self.rawAxis.append(data[record])
+
+        # Generate mass, acceleration, thrust and velocity axes
+        self.massAxis.append(self.weightStart)
+        for index, raw in enumerate(self.rawAxis):
+            self.massAxis.append(self.massAxis[index] - raw/sum(self.rawAxis)*self.fuelSpent)
+            self.accAxis.append((raw/101.971/(self.massAxis[index] - raw/sum(self.rawAxis)*self.fuelSpent)*1000-gravity))
+            self.thrustAxis.append(self.massAxis[index+1]/1000*self.accAxis[index])
+            self.velAxis.append(self.velAxis[index]+self.accAxis[index]/self.frequency)
+        del(self.massAxis[0], self.velAxis[0]) 
+
+        self.specificImpulse = max(self.velAxis)/9.80665*np.log(self.weightStart/weightStop)
+        self.impulse = sum(self.thrustAxis)/self.frequency
+        self.burnTime = (burnStop-burnStart)/self.frequency
+
+        image = image.imread('/home/Kuba/Documents/testy/bobr.jpg')
+
+
+        fig = plt.figure("Thrust grapher", figsize=(6.4*2,4.8*1.45))
+
+        thrustAx = plt.subplot(2,2,1)
+        thrustAx.set_ylabel("Thrust [N]", color = "blue")
+        thrustAx.plot(self.timeAxis, self.thrustAxis, color="blue")
+        thrustAx.tick_params(axis="y", labelcolor="blue")
+        plt.title("Thrust curve")
+
+        massAx = plt.subplot(2,2,3)
+        massAx.set_xlabel("Time [s]")
+        massAx.set_ylabel("Mass [g]", color = "red")
+        massAx.plot(self.timeAxis, self.massAxis, color="red")
+        massAx.tick_params(axis="y", labelcolor="red")
+
+        velAx = massAx.twinx()
+        velAx.set_ylabel("Velocity [m/s]", color = "green")
+        velAx.plot(self.timeAxis, self.velAxis, color="green")
+        velAx.tick_params(axis="y", labelcolor="green")
+        plt.title("Speed and mass curve")
+
+        dataAx = plt.subplot(2,2,2)
+        plt.tick_params(axis='x', which='both', bottom=False, top=False, labelbottom=False)
+        plt.tick_params(axis='y', which='both', right=False, left=False, labelleft=False)
+        for pos in ['right', 'top', 'bottom', 'left']:
+            plt.gca().spines[pos].set_visible(False)
+
+        def power(pow):
+            return("$^{" + str(pow) + "}$")
+
+        dataAx.text(0.02, -0.01, f'Specific impulse: {round(self.specificImpulse, 2)} s\nTotal impulse: {round(self.impulse, 2)} $N\cdot s$\nImpulse per gram of fuel: '
+                            f'{round(self.impulse/self.fuelSpent, 2)} $N\cdot s\cdot g${power(-1)}\n\nMaximum thrust: {round(max(self.thrustAxis), 2)} N\nMaximum velocity: {round(max(self.velAxis), 2)}'
+                            f' $m\cdot s${power(-1)}\nMaximum acceleration: {round(max(self.accAxis), 2)} $m\cdot s$ {power(-2)}\n\nMass loss: {round(self.fuelSpent, 2)} g\nStarting mass: {round(self.weightStart, 4)}'
+                            f' g\n\nBurn time: {round(self.burnTime, 2)} s\nFrequency: {round(self.frequency, 2)} Hz', fontsize=11)
+        plt.title("Details")
+
+        imAx = plt.subplot(2,2,4)
+        plt.tick_params(axis='x', which='both', bottom=False, top=False, labelbottom=False)
+        plt.tick_params(axis='y', which='both', right=False, left=False, labelleft=False)
+        for pos in ['right', 'top', 'bottom', 'left']:
+            plt.gca().spines[pos].set_visible(False)
+
+        imAx.imshow(image, aspect='auto', extent=(0.4, 0.6, .5, .7), zorder=-1)
+        plt.title("Bobr")
+
+        fig.suptitle(f'{self.frequency} rocket dynamometer test', fontsize=18)
+
+        plt.show()
+
+class Locator:
+
+    def __init__(self, data):
+
+        self.weightStart, self.weightStop, self.burnStart, self.burnStop = int(), int(), int(), int()
+        self.data = data
+        self.inputData = data
+
+    def locate(self):
+        
+        weight, burn, average = int(), int(), [] # Reset variables so function can be called again
+        for index, value in enumerate(self.inputData):
+            if len(average) < 10: average.append(value); # Read first 10 values
+            elif not weight:
+                weight = sum(average)/10; # Define the weight of the motor at the start
+            else:
+             if sum(average)/10 > weight + 3: # If the last readings exceed a threshold, declare burn start
+                burn = index
+                if not self.weightStart:
+                    self.weightStart = weight; self.burnStart = burn
+                    self.inputData.reverse()
+                    Locator.locate() # Second call of function reversed???
+                elif not self.weightStop:
+                    self.weightStop = weight; self.burnStop = len(self.inputData) - burn 
+                    return (self.weightStart, self.weightStop, self.burnStart, self.burnStop, self.data)
+                average.append(value)
+                del(average[0])
+
+
+UI()
